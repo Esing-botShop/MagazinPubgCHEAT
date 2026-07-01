@@ -1,3 +1,5 @@
+# flask_app.py – Full Telegram Shop Bot (clean version)
+
 import asyncio
 import json
 import os
@@ -7,13 +9,22 @@ from datetime import datetime, timedelta
 from telethon import TelegramClient, events, types
 from aiohttp import web
 
+# === CONFIGURATION (from environment variables) ===
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
-BOT_TOKEN = os.environ.get('8893741696:AAGtWe-XgCFOme3wmYgVWNm9vy_9zmF06FE', '')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 0))
 CHANNEL_LINK = os.environ.get('CHANNEL_LINK', 'https://t.me/perexodnikTIOMKI')
 PORT = int(os.environ.get('PORT', 8080))
 
+# Fallback if env not set (REMOVE in production)
+if API_ID == 0:
+    API_ID = 12345
+    API_HASH = 'your_api_hash'
+    BOT_TOKEN = '8893741696:AAGtWe-XgCF0me3wmYgVWnM9v9_y2mF86FE'
+    ADMIN_ID = 123456789
+
+# === DATA STORAGE ===
 USERS = {}
 ORDERS = {}
 COUPONS = {}
@@ -76,8 +87,10 @@ def get_duration_keyboard(platform, product):
     buttons.append([types.KeyboardButtonText('🔙 Назад')])
     return buttons
 
+# === BOT CLIENT ===
 bot = TelegramClient('shop_bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
+# === HANDLERS ===
 @bot.on(events.NewMessage(pattern='/start'))
 async def start_handler(event):
     user_id = str(event.sender_id)
@@ -151,8 +164,10 @@ async def purchase_handler(event):
     duration = parts[0].strip()
     price = int(parts[1].replace('₽', '').strip())
     product = 'Z_MODE'
+    
     if user_id not in USERS:
         USERS[user_id] = {'balance': 0, 'referrals': 0, 'orders': [], 'name': 'User'}
+    
     if USERS[user_id]['balance'] < price:
         await event.reply(
             f'❌ Недостаточно средств!\n'
@@ -161,6 +176,7 @@ async def purchase_handler(event):
             'Пополните баланс через администратора @relocate1777'
         )
         return
+
     USERS[user_id]['balance'] -= price
     order_id = f'ORD{int(time.time())}{random.randint(100,999)}'
     ORDERS[order_id] = {
@@ -174,6 +190,7 @@ async def purchase_handler(event):
     }
     USERS[user_id]['orders'].append(order_id)
     save_data()
+
     await event.reply(
         f'✅ *Покупка успешна!*\n\n'
         f'📦 Товар: {product}\n'
@@ -280,6 +297,7 @@ async def channel_handler(event):
 async def back_handler(event):
     await start_handler(event)
 
+# === ADMIN COMMANDS ===
 @bot.on(events.NewMessage(pattern='/admin'))
 async def admin_handler(event):
     if event.sender_id != ADMIN_ID:
@@ -316,6 +334,7 @@ async def add_coupon(event):
     save_data()
     await event.reply(f'✅ Купон {code} создан на {discount}₽, действует {days} дней.')
 
+# === WEB SERVER ===
 async def health_check(request):
     return web.Response(text='Bot is running', status=200)
 
@@ -328,6 +347,7 @@ async def run_web():
     await site.start()
     print(f'Web server running on port {PORT}')
 
+# === MAIN ===
 async def main():
     load_data()
     print('🏪 Relocate Store Bot starting...')
