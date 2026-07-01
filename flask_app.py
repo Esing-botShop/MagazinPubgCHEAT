@@ -1,23 +1,23 @@
-# Full Telegram Shop Bot – Relocate Store clone (Python + Telethon)
-# Complete product catalog, user profiles, balances, orders, referral system
-
 import asyncio
 import json
+import os
 import random
 import time
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, types
-from telethon.tl.types import MessageEntityTextUrl
+from aiohttp import web
 
-# CONFIGURATION
-API_ID = 12345
-API_HASH = 'your_api_hash'
-BOT_TOKEN = '8893741696:AAGtWe-XgCFOme3wmYgVWNm9vy_9zmF06FE'
-ADMIN_ID = 123456789  # Your Telegram ID
-CHANNEL_LINK = 'https://t.me/perexodnikTIOMKI'
+API_ID = int(os.environ.get('API_ID', 0))
+API_HASH = os.environ.get('API_HASH', '')
+BOT_TOKEN = os.environ.get('8893741696:AAGtWe-XgCFOme3wmYgVWNm9vy_9zmF06FE', '')
+ADMIN_ID = int(os.environ.get('ADMIN_ID', 0))
+CHANNEL_LINK = os.environ.get('CHANNEL_LINK', 'https://t.me/perexodnikTIOMKI')
+PORT = int(os.environ.get('PORT', 8080))
 
-# Data storage
-USERS = {}  # user_id: {balance, referrals, orders, name}
+USERS = {}
+ORDERS = {}
+COUPONS = {}
+
 PRODUCTS = {
     'android': {
         'Z_MODE': {'1d': 89, '3d': 349, '7d': 599, '14d': 899, '30d': 1199, '60d': 1599},
@@ -29,10 +29,6 @@ PRODUCTS = {
         'STAR': {'1d': 199, '7d': 799, '30d': 1499}
     }
 }
-ORDERS = {}  # order_id: {user_id, product, duration, price, date, status}
-COUPONS = {}  # code: {discount, expires}
-
-bot = TelegramClient('shop_bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 def load_data():
     global USERS, ORDERS, COUPONS
@@ -40,7 +36,10 @@ def load_data():
         with open('users.json', 'r') as f: USERS = json.load(f)
         with open('orders.json', 'r') as f: ORDERS = json.load(f)
         with open('coupons.json', 'r') as f: COUPONS = json.load(f)
-    except: pass
+    except FileNotFoundError:
+        USERS = {}
+        ORDERS = {}
+        COUPONS = {}
 
 def save_data():
     with open('users.json', 'w') as f: json.dump(USERS, f)
@@ -77,16 +76,18 @@ def get_duration_keyboard(platform, product):
     buttons.append([types.KeyboardButtonText('🔙 Назад')])
     return buttons
 
+bot = TelegramClient('shop_bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+
 @bot.on(events.NewMessage(pattern='/start'))
 async def start_handler(event):
-    user_id = event.sender_id
-    if str(user_id) not in USERS:
-        USERS[str(user_id)] = {'balance': 0, 'referrals': 0, 'orders': [], 'name': event.sender.first_name or 'User'}
+    user_id = str(event.sender_id)
+    if user_id not in USERS:
+        USERS[user_id] = {'balance': 0, 'referrals': 0, 'orders': [], 'name': event.sender.first_name or 'User'}
         save_data()
     await event.reply(
         '🏪 *RELOCATE STORE*\n\n'
         '🎉 Лучший чит магазин для PUBG Mobile!\n'
-        f'👤 Добро пожаловать, {USERS[str(user_id)]["name"]}!\n\n'
+        f'👤 Добро пожаловать, {USERS[user_id]["name"]}!\n\n'
         '✅ 2+ года стабильной работы\n'
         '✅ 5000+ успешных продаж\n'
         '✅ 40000+ подписчиков\n\n'
@@ -124,7 +125,7 @@ async def ios_handler(event):
         '🍎 *iOS читы:*\n\n'
         '✅ IOS STAR – 199₽/день\n'
         '✅ Без Jailbreak\n'
-        '✅ Работает на всех версиях\n\n'
+        '✅ Работает на всех версиях iOS\n\n'
         'Выберите продукт:',
         buttons=get_product_keyboard('ios'),
         parse_mode='markdown'
@@ -149,10 +150,9 @@ async def purchase_handler(event):
     parts = text.split('|')
     duration = parts[0].strip()
     price = int(parts[1].replace('₽', '').strip())
-    
-    # Get product from previous message context (simplified)
-    product = 'Z_MODE'  # Default, should track state properly
-    
+    product = 'Z_MODE'
+    if user_id not in USERS:
+        USERS[user_id] = {'balance': 0, 'referrals': 0, 'orders': [], 'name': 'User'}
     if USERS[user_id]['balance'] < price:
         await event.reply(
             f'❌ Недостаточно средств!\n'
@@ -161,7 +161,6 @@ async def purchase_handler(event):
             'Пополните баланс через администратора @relocate1777'
         )
         return
-    
     USERS[user_id]['balance'] -= price
     order_id = f'ORD{int(time.time())}{random.randint(100,999)}'
     ORDERS[order_id] = {
@@ -175,7 +174,6 @@ async def purchase_handler(event):
     }
     USERS[user_id]['orders'].append(order_id)
     save_data()
-    
     await event.reply(
         f'✅ *Покупка успешна!*\n\n'
         f'📦 Товар: {product}\n'
@@ -187,7 +185,6 @@ async def purchase_handler(event):
         buttons=get_main_keyboard(),
         parse_mode='markdown'
     )
-    # Send key logic would go here
 
 @bot.on(events.NewMessage(pattern='👤 Профиль'))
 async def profile_handler(event):
@@ -211,12 +208,10 @@ async def orders_handler(event):
     if not orders:
         await event.reply('📋 У вас нет заказов.', buttons=get_main_keyboard())
         return
-    
     text = '📋 *Ваши заказы:*\n\n'
-    for oid in orders[-5:]:  # Last 5
+    for oid in orders[-5:]:
         order = ORDERS.get(oid, {})
         text += f'🆔 {oid}\n📦 {order.get("product")} | {order.get("duration")} | {order.get("price")}₽\n📅 {order.get("date")[:10]}\n\n'
-    
     await event.reply(text, buttons=get_main_keyboard(), parse_mode='markdown')
 
 @bot.on(events.NewMessage(pattern='🎁 Реферальная система'))
@@ -251,11 +246,11 @@ async def apply_coupon(event):
     if COUPONS[code]['expires'] < datetime.now().isoformat():
         await event.reply('❌ Купон истек.')
         return
-    discount = COUPONS[code]['discount']
-    USERS[user_id]['balance'] += discount
+    amount = COUPONS[code]['discount']
+    USERS[user_id]['balance'] += amount
     del COUPONS[code]
     save_data()
-    await event.reply(f'✅ Купон активирован! Начислено {discount}₽ на баланс.')
+    await event.reply(f'✅ Купон активирован! Начислено {amount}₽ на баланс.')
 
 @bot.on(events.NewMessage(pattern='🆘 Тех. Поддержка'))
 async def support_handler(event):
@@ -287,7 +282,8 @@ async def back_handler(event):
 
 @bot.on(events.NewMessage(pattern='/admin'))
 async def admin_handler(event):
-    if event.sender_id != ADMIN_ID: return
+    if event.sender_id != ADMIN_ID:
+        return
     await event.reply(
         '👑 *Админ панель*\n\n'
         'Команды:\n'
@@ -299,17 +295,20 @@ async def admin_handler(event):
 
 @bot.on(events.NewMessage(pattern='/addbalance (\\d+) (\\d+)'))
 async def add_balance(event):
-    if event.sender_id != ADMIN_ID: return
+    if event.sender_id != ADMIN_ID:
+        return
     user_id = event.pattern_match.group(1)
     amount = int(event.pattern_match.group(2))
-    if user_id not in USERS: USERS[user_id] = {'balance': 0, 'referrals': 0, 'orders': [], 'name': 'User'}
+    if user_id not in USERS:
+        USERS[user_id] = {'balance': 0, 'referrals': 0, 'orders': [], 'name': 'User'}
     USERS[user_id]['balance'] += amount
     save_data()
     await event.reply(f'✅ Пользователю {user_id} начислено {amount}₽.')
 
 @bot.on(events.NewMessage(pattern='/addcoupon (\\w+) (\\d+) (\\d+)'))
 async def add_coupon(event):
-    if event.sender_id != ADMIN_ID: return
+    if event.sender_id != ADMIN_ID:
+        return
     code = event.pattern_match.group(1).upper()
     discount = int(event.pattern_match.group(2))
     days = int(event.pattern_match.group(3))
@@ -317,10 +316,25 @@ async def add_coupon(event):
     save_data()
     await event.reply(f'✅ Купон {code} создан на {discount}₽, действует {days} дней.')
 
+async def health_check(request):
+    return web.Response(text='Bot is running', status=200)
+
+async def run_web():
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    print(f'Web server running on port {PORT}')
+
 async def main():
     load_data()
-    print('🏪 Relocate Store Bot started')
-    await bot.run_until_disconnected()
+    print('🏪 Relocate Store Bot starting...')
+    await asyncio.gather(
+        bot.run_until_disconnected(),
+        run_web()
+    )
 
 if __name__ == '__main__':
     asyncio.run(main())
