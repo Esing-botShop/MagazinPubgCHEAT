@@ -12,9 +12,9 @@ from telethon.tl.types import MessageEntityTextUrl
 # CONFIGURATION
 API_ID = 12345
 API_HASH = 'your_api_hash'
-BOT_TOKEN = 'your_bot_token'
+BOT_TOKEN = '8893741696:AAGtWe-XgCFOme3wmYgVWNm9vy_9zmF06FE'
 ADMIN_ID = 123456789  # Your Telegram ID
-CHANNEL_LINK = 'https://t.me/your_channel'
+CHANNEL_LINK = 'https://t.me/perexodnikTIOMKI'
 
 # Data storage
 USERS = {}  # user_id: {balance, referrals, orders, name}
